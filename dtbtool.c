@@ -40,10 +40,10 @@
 #include <errno.h>
 #include <unistd.h>
 
-#define PXADT_MAGIC     "PXA-DT"  /* Master DTB magic */
-#define PXADT_VERSION   1         /* PXADT version */
+#define SPRD_MAGIC     "SPRD"  /* Master DTB magic */
+#define SPRD_VERSION   1         /* SPRD-DT version */
 
-#define PXADT_DT_TAG    "pxa,rev-id = <"
+#define SPRD_DT_TAG    "sprd,sc-id = <"
 
 #define PAGE_SIZE_DEF  2048
 #define PAGE_SIZE_MAX  (1024*1024)
@@ -60,6 +60,7 @@
 struct chipInfo_t {
   uint32_t platform;
   uint32_t revNum;
+  uint32_t chipset;
   uint32_t dtb_size;
   char     *dtb_file;
   struct chipInfo_t *prev;
@@ -159,9 +160,11 @@ int chip_add(struct chipInfo_t *c)
     }
 
     while (1) {
-        if ((c->platform < x->platform) ||
-              ((c->platform == x->platform) &&
-               (c->revNum < x->revNum))) {
+        if ((c->chipset < x->chipset) ||
+          ((c->chipset == x->chipset) &&
+          ((c->platform < x->platform) ||
+          ((c->platform == x->platform) &&
+          (c->revNum < x->revNum))))) {
             if (!x->prev) {
                 c->next = x;
                 c->prev = NULL;
@@ -177,7 +180,8 @@ int chip_add(struct chipInfo_t *c)
             }
         }
         if ((c->platform == x->platform) &&
-            (c->revNum == x->revNum)) {
+            (c->revNum == x->revNum) &&
+            (c->chipset == x->chipset)) {
             return RC_ERROR;  /* duplicate */
         }
         if (!x->next) {
@@ -204,8 +208,8 @@ void chip_deleteall()
     }
 }
 
-/* Extract 'pxa,rev-id' parameter duplet from DTB
-      pxa,rev-id = <x y>;
+/* Extract 'sprd,sc-id' parameter duplet from DTB
+      sprd,sc-id = <x y z>;
  */
 struct chipInfo_t *getChipInfo(const char *filename, int *num)
 {
@@ -250,15 +254,15 @@ struct chipInfo_t *getChipInfo(const char *filename, int *num)
     if (pfile == NULL) {
         log_err("... skip, fail to decompile dtb\n");
     } else {
-        /* Find "pxa,rev-id" */
+        /* Find "sprd,sc-id" */
         while ((llen = getline(&line, &line_size, pfile)) != -1) {
-            if ((pos = strstr(line, PXADT_DT_TAG)) != NULL) {
-                pos += strlen(PXADT_DT_TAG);
+            if ((pos = strstr(line, SPRD_DT_TAG)) != NULL) {
+                pos += strlen(SPRD_DT_TAG);
 
                 entryEnded = 0;
                 while (1) {
                     entryValid = 1;
-                    for (i = 0; i < 2; i++) {
+                    for (i = 0; i < 3; i++) {
                         tok = strtok_r(pos, " \t", &sptr);
                         pos = NULL;
                         if (tok != NULL) {
@@ -296,6 +300,7 @@ struct chipInfo_t *getChipInfo(const char *filename, int *num)
                         }
                         tmp->platform = data[0];
                         tmp->revNum   = data[1];
+                        tmp->chipset   = data[1];
                         tmp->dtb_size = 0;
                         tmp->dtb_file = NULL;
                         tmp->master   = chip;
@@ -305,7 +310,7 @@ struct chipInfo_t *getChipInfo(const char *filename, int *num)
                     }
                 }
 
-                log_err("... skip, incorrect '%s' format\n", PXADT_DT_TAG);
+                log_err("... skip, incorrect '%s' format\n", SPRD_DT_TAG);
                 break;
             }
         }
@@ -334,7 +339,7 @@ int main(int argc, char **argv)
     int dtb_count = 0, dtb_offset = 0;
     size_t wrote = 0, expected = 0;
     struct stat st;
-    uint32_t version = PXADT_VERSION;
+    uint32_t version = SPRD_VERSION;
     int num;
     uint32_t dtb_size;
 
@@ -363,7 +368,7 @@ int main(int argc, char **argv)
     memset(filler, 0, page_size);
 
     /* Open the .dtb files in the specified path, decompile and
-       extract "pxa,rev-id" parameter
+       extract "sprd,sc-id" parameter
      */
     while ((dp = readdir(dir)) != NULL) {
         if ((dp->d_type == DT_REG)) {
@@ -386,7 +391,7 @@ int main(int argc, char **argv)
                 chip = getChipInfo(filename, &num);
                 if (!chip) {
                     log_err("skip, failed to scan for '%s' tag\n",
-                            PXADT_DT_TAG);
+                            SPRD_DT_TAG);
                     free(filename);
                     continue;
                 }
@@ -454,13 +459,13 @@ int main(int argc, char **argv)
     }
 
     /* Write header info */
-    wrote += write(out_fd, PXADT_MAGIC, sizeof(uint8_t) * 6); /* magic */
+    wrote += write(out_fd, SPRD_MAGIC, sizeof(uint8_t) * 4); /* magic */
     wrote += write(out_fd, &version, sizeof(uint32_t));      /* version */
     wrote += write(out_fd, (uint32_t *)&dtb_count, sizeof(uint32_t));
                                                              /* #DTB */
 
     /* Calculate offset of first DTB block */
-    dtb_offset = 14               + /* header */
+    dtb_offset = 12               + /* header */
                  (16 * dtb_count) + /* DTB table entries */
                  4;                 /* end of table indicator */
     /* Round up to page size */
